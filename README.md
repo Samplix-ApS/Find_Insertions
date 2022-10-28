@@ -4,11 +4,16 @@
  - [Requirements](#reqs_)
 - [Find insertions](#find_insert_)
   - [Mask genome](#mask_genome_)
-  - [Create custom genome](#create_genome_)
+  - [Create custom genome](#custom_genome_)
   - [Identify reads of interest](#ident_reads_)
     - [Strict approach](#strict_)
     - [Loose approach](#loose_)
   - [Map extracted reads](#map_extract_)
+  - [OPTIONAL: Karyoplot](#opt_plot_)
+  - [Find mapped reads](#find_reads_)
+  - [Create custom genome with insert](#insert_genome_)
+  - [Map to custom genome with insert](#map_insert_genome_)
+  - [Multiple insertions](#multi_insert_)
 - [Authors](#authors_)
 
 # <a name="descript_"></a> Description
@@ -42,7 +47,7 @@ Mask the genome based on construct mapping positions. Input must be in fasta for
 bedtools maskfasta [OPTIONS] -fi Genome.fasta -bed CONSTRUCT_TO_GENOME.bed -fo masked_Genome.fasta
 ```
 
-## <a name="create_genome_"></a> Create custom genome
+## <a name="custom_genome_"></a> Create custom genome
 Generate a costum genome containg the construct. Sequences need to be in same format e.g. either fa or fasta.gz (```gzip``` to compress or ```gzip -d``` to decompress).
 Run the following command:
 ```
@@ -105,8 +110,54 @@ This is optional. Plot ```DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_GENOME``` on chromos
 python3 /home/ec2-user/data_CAJ/python_scripts/prep_reference.py -i REFERENCE <optional>
 Rscript /home/ec2-user/data_CAJ/python_scripts/karyoploteR_read_density.R -i DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam -p /home/ec2-user/Refseq/Standard/REFERENCE_GENOME/karyoploteR.genome.file.txt
 ```
+## <a name="find_reads_"></a> Find mapped reads
+Find where reads map in ```DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam```.
+Find all positions with 1 coverage, merge continous regions within 100 bp. See regions using coverage, and the full command is:
+```
+bedtools genomecov -bg -ibam DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam | awk '$4>=1' | bedtools merge -d 100 -i stdin | bedtools coverage -a stdin -b DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam > Potentil_insert_sites.txt
+```
+Here for example there are 21 reads in region chr1:154566162-154566294. These 21 reads cover 132bp and the region itself is 132bp long, so 100% of the region is covered.
+```
+chr1	154566162	154566294	21	132	132	1.0000000
+```
+Use the different plots and positions to look at regions with coverage in ```DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam``` in IGV.
 
+## <a name="insert_genome_"></a> Create custom genome with insert
+Based on the results, create a new reference genome with the construct inserted. This can be done in CLC mainwork bench. 
+Open the genome of interest, and rename. Find  the position for insert, right click and choose edit seletion. Add the insert and e.g. delete bases.
+Export the new genome as a fasta sequence and transfer to the server.
 
+## <a name="map_insert_genome_"></a> Map to custom genome with insert
+Map all data to the new custom genome containing the insert either manually or use the pipeline.
+
+For manual mapping, use the following:
+```
+/usr/local/minimap/minimap2 -ax map-ont NEW_GENOME.fasta DATA.fastq > DATA_MAPPED_TO_NEW_GENOME.sam
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o DATA_MAPPED_TO_NEW_GENOME.sort.bam DATA_MAPPED_TO_NEW_GENOME.sam
+/home/ec2-user/samtools-1.9/samtools index DATA_MAPPED_TO_NEW_GENOME.sort.bam
+```
+Take a look in IGV and look at coverage profile. Adjust the new custom genome with insert file if needed.  
+
+## <a name="multi_insert_"></a> Multiple insertions
+In case there are multiple insertion sites expected, it may be necessary to extract reads from each potential integration site and map again to the genome containing the construct.
+
+Extract reads in region with coverage:
+```
+samtools view -@ 16 -hb DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam CHR:INSERTION_REGION > READS_FROM_INSERTION_REGION.bam
+samtools view READS_FROM_INSERTION_REGION.bam | awk '{print $1}' | sort | uniq -c | awk '{print $2}' > read.names
+seqkit grep -f read.names DATA_MAPPED_TO_CONSTRUCT_xx-yy.fastq > READS_FROM_INSERTION_REGION.fastq
+seqkit seq -n READS_FROM_INSERTION_REGION.fastq | wc -l
+```
+Note down the number of reads that mapped 
+
+Then map to genome with construct:
+```
+/usr/local/minimap/minimap2 -ax map-ont Masked_Genome_with_constructs.fasta READS_FROM_INSERTION_REGION.fastq > READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sam 
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o  READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sort.bam  READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sam  
+/home/ec2-user/samtools-1.9/samtools index -@ 16 READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sort.bam
+```
+
+Then add tag as previously.
 
 # <a name="authors_"></a> Authors
-SOP from Services adapted by CAJ
+SOP from Services provided by CNA and adapted by CAJ
