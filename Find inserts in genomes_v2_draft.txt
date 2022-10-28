@@ -1,0 +1,123 @@
+
+#START OUT BY MASKING REGIONS IN THE GENOME, WHERE THE CONSTRUCT MAPS
+###map construct to genome
+/usr/local/minimap/minimap2 -ax map-ont Genome.fasta.gz CONSTRUCT.fasta > CONSTRUCT_TO_GENOME.sam 
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o  CONSTRUCT_TO_GENOME.bam  CONSTRUCT_TO_GENOME.sam 
+/home/ec2-user/samtools-1.9/samtools index -@ 16 CONSTRUCT_TO_GENOME.bam
+#Make a bed file for masking
+/usr/local/bedtools/bin/bedtools bamtobed -i CONSTRUCT_TO_GENOME.bam > CONSTRUCT_TO_GENOME.bed
+###mask genome based on construct mapping positions. Inout need to be fasta. 
+bedtools maskfasta [OPTIONS] -fi Genome.fasta -bed CONSTRUCT_TO_GENOME.bed -fo masked_Genome.fasta
+#-mc Specify a masking character. default N. 
+
+#GENERATE A COSTUM GENOME CONTAINING THE CONSTRUCT
+###generate a costum genome containg the constructs. Sequences need to be in same format e.g. either fa or fasta.gz (gzip to compress or gzip -d to decompress)
+cat masked_Genome.fasta CONSTRUCT.fasta  > Masked_Genome_with_constructs.fasta
+
+
+#IDENTIFY THE READS OF INTEREST THAT MAP TO THE CONSTRUCT. 
+#THE SCRICT APPROACH IS TO MAP TO THE GENOME WITH CONSTRUCT AND EXTRACT READS FROM CONSTRUCT. 
+#IF A MORE LOOSE SETTING E.G. IF FEW READS OR MANY INSERTS ARE EXPECTED, THEN MAP TO CONSTRUCT AND EXTRACT READS. 
+#THE LOOSE SETTING WILL GIVE MORE FALSE-POSITIVE INTEGRATION SITES, BUT ALSO MORE READS ON THE POTENTIAL GOOD INTEGRATION SITES. 
+
+#STRICT OPTION
+###map reads to masked genome with construct
+/usr/local/minimap/minimap2 -ax map-ont Masked_Genome_with_constructs.fasta DATA.fastq > DATA_MAPPED_TO_MASKED_GENOME_CONSTRUCT.sam
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o DATA_MAPPED_TO_MASKED_GENOME_CONSTRUCT.sort.bam DATA_MAPPED_TO_MASKED_GENOME_CONSTRUCT.sam
+/home/ec2-user/samtools-1.9/samtools index DATA_MAPPED_TO_MASKED_GENOME_CONSTRUCT.sort.bam
+###E.g. take a look in IGV and look at coverage profile
+
+
+####extraction of reads constructs extract primary, supplementary and secondary from construct
+samtools view -@ 16 -hb DATA_MAPPED_TO_MASKED_GENOME_CONSTRUCT.sort.bam CHR:start-end > DATA_MAPPED_TO_CONSTRUCT_xx-yy.bam
+samtools view DATA_MAPPED_TO_CONSTRUCT_xx-yy.bam | awk '{print $1}' | sort | uniq -c | awk '{print $2}' > read.names
+seqkit grep -f read.names DATA.fastq > READS_MAPPED_TO_CONSTRUCT_xx-yy.fastq
+seqkit seq -n READS_FROM_INSERTION_REGION.fastq | wc -l
+### note the number of reads that mapped 
+
+
+
+#LOOSE OPTION
+###map reads to construct
+/usr/local/minimap/minimap2 -ax map-ont CONSTRUCT.fasta DATA.fastq > DATA_MAPPED_TO_CONSTRUCT.sam
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o DATA_MAPPED_TO_CONSTRUCT.sort.bam DATA_MAPPED_TO_CONSTRUCT.sam
+/home/ec2-user/samtools-1.9/samtools index DATA_MAPPED_TO_CONSTRUCT.sort.bam
+###E.g. take a look in IGV and look at coverage profile
+
+#extraction of reads loose option primary is enough, however, it would not matter to use the primary, suppl. and secondary
+###extract the reads mapping to construct. 
+/home/ec2-user/samtools-1.9/samtools view -@ 16 -hb [DATA_MAPPED_TO_CONSTRUCT.sort.bam OR DATA_MAPPED_TO_MASKED_GENOME_CONSTRUCT.sort.bam] CONSTRUCT_NAME:xx-yy > DATA_MAPPED_TO_CONSTRUCT_xx-yy.bam
+/home/ec2-user/samtools-1.9/samtools bam2fq -@ 16 DATA_MAPPED_TO_CONSTRUCT_xx-yy.bam > READS_MAPPED_TO_CONSTRUCT_xx-yy.fastq
+### note the number of reads that mapped to construct
+
+
+
+
+###MAP THE EXTRACTED READS TO THE MASKED GENOME WITH CONSTRUCT
+/usr/local/minimap/minimap2 -ax map-ont Masked_Genome_with_construct.fasta READS_MAPPED_TO_CONSTRUCT_xx-yy.fastq > DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.sam 
+
+###ADD TAG -change CHR_COMMON to eg. Chr depending on name of chromosomes and change construct naming
+less DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.sam  | perl -ne 'if($_=~/^(.*)\s+\d+\s+(CHR_COMMON.*|CONSTRUCT_NAME.*)/){chomp($_);print "$_"."\tRN:Z:$1\n"} else{print $_}' > DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT_tag.sam
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o  DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT_tag.bam DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT_tag.sam
+samtools index -@ 16 DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT_tag.bam
+
+
+
+
+#YOU CAN USE THE BELOW SCRPIT INSTEAD WHICH WILL ALSO ADD WHERE THE READS MAP
+#you should add a sort just to be safe
+samtools sort -@ 16 -O BAM -o  DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.sort.bam DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.sam 
+samtools index -@ 16 DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.sort.bam
+###In IGV color by tag RG (read name) and group by tag RZ (mapped chromosomes). 
+python3 /home/ec2-user/data_CAJ/python_scripts/addSAMtag.py -i BAM/SAM_file <optional> 
+
+
+
+###OPTINONAL. plot DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_GENOME on chromosomes. THIS MAY BE BEST USING A GENOME WHERE THE CONSTRUCT IS NOT PRESENT, AS THE X-AXSIS SCALE TO HIGHST DENSITY
+python3 /home/ec2-user/data_CAJ/python_scripts/PrepReference2.py -i REFERENCE <optional>
+Rscript /home/ec2-user/data_CAJ/python_scripts/KaryoploteR_read_density.R -i DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam -p /home/ec2-user/Refseq/Standard/REFERENCE_GENOME/karyoploteR.genome.file.txt
+
+
+
+#Find where reads map in a DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam
+#find all positions with 1 coverage, merge continous regions within 100 bp. se regions using coverage, and the full command is:
+bedtools genomecov -bg -ibam DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam | awk '$4>=1' | bedtools merge -d 100 -i stdin | bedtools coverage -a stdin -b DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam > Potentil_insert_sites.txt
+#Format:
+#chr1	154566162	154566294	21	132	132	1.0000000
+#Here for example there are 21 reads in region chr1:154566162-154566294. These 21 reads cover 132bp and the region itself is 132bp long, so 100% of the region is covered.
+
+
+###Use the different plots and positions to look at regions with coverage in DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam in IGV
+
+###based on the results create a new reference genome with the construct inserted. This can be done in CLC mainwork bench. 
+	#open the genome of interest
+	#rename
+	#find the position for insert, right click and choose edit seletion. Add the insert and e.g. delete bases.
+	#export the new genome as a fasta sequence and transfer to costum genomes on the server
+	
+###Map all data to the "new genome" either manual or use the pipeline
+/usr/local/minimap/minimap2 -ax map-ont NEW_GENOME.fasta DATA.fastq > DATA_MAPPED_TO_NEW_GENOME.sam
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o DATA_MAPPED_TO_NEW_GENOME.sort.bam DATA_MAPPED_TO_NEW_GENOME.sam
+/home/ec2-user/samtools-1.9/samtools index DATA_MAPPED_TO_NEW_GENOME.sort.bam
+### take a look in IGV and look at coverage profile. Adjust the new genome file if needed. 
+
+
+#####In case more insertions are expected one may need to extract reads from each potential integration site and map again to the genome containing the construct.
+
+####extraction of reads in region with coverage extract primary, supplementary and secondary
+samtools view -@ 16 -hb DATA_MAPPED_TO_CONSTRUCT_xx-yy_TO_MASKED_GENOME_CONSTRUCT.TAG.SORT.bam CHR:INSERTION_REGION > READS_FROM_INSERTION_REGION.bam
+samtools view READS_FROM_INSERTION_REGION.bam | awk '{print $1}' | sort | uniq -c | awk '{print $2}' > read.names
+seqkit grep -f read.names DATA_MAPPED_TO_CONSTRUCT_xx-yy.fastq > READS_FROM_INSERTION_REGION.fastq
+seqkit seq -n READS_FROM_INSERTION_REGION.fastq | wc -l
+### note the number of reads that mapped 
+# XX reads map to construct
+####map to genome with construct 
+/usr/local/minimap/minimap2 -ax map-ont Masked_Genome_with_constructs.fasta READS_FROM_INSERTION_REGION.fastq > READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sam 
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o  READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sort.bam  READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sam  
+/home/ec2-user/samtools-1.9/samtools index -@ 16 READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sort.bam
+
+###ADD TAG -change CHR_COMMON to eg. Chr depending on name of chromosomes and change construct naming
+less READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT.sam    | perl -ne 'if($_=~/^(.*)\s+\d+\s+(CHR_COMMON.*|CONSTRUCT_NAME.*)/){chomp($_);print "$_"."\tRN:Z:$1\n"} else{print $_}' > READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT_tag.sam  
+/home/ec2-user/samtools-1.9/samtools sort -@ 16 -O BAM -o  READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT_tag.bam READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT_tag.sam  
+samtools index -@ 16 READS_FROM_INSERTION_REGION_GENOME_WITH_CONSTRUCT_tag.bam
+
