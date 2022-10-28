@@ -17,7 +17,16 @@
 - [Authors](#authors_)
 
 # <a name="descript_"></a> Description
-This manual describes how to find insertions in the alignment.
+In this document we describe the procedure for identifying the insertion sites in host genomes using Xdrop enrichment and Oxford nanopore long read sequencing.
+In brief, we identify those reads that match the insert or constructs, and then check where these reads map to the genome, which will reveal the border between the insert and host genome. 
+
+
+<p align="center">
+<img src="https://user-images.githubusercontent.com/60882704/198660649-3ee44740-a9ff-479b-a63c-68b89e9bd063.png" width="600" height="" >
+
+<sub>The workflow for identification of insert sites in genomes after Xdrop enrichment and Oxford Nanopore Long read sequencing.</sub>
+</p>
+
 ## <a name="reqs_"></a> Requirements
 * samtools
 * seqkit
